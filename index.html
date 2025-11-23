@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 降重助手</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0d1117;
+      --panel: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --accent: #2f81f7;
+      --muted: #8b949e;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Inter", "SF Pro Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: linear-gradient(135deg, #0c1824, #0d1117 45%);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .title {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .button {
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #1f2933;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.15s ease;
+    }
+
+    .button.primary {
+      background: var(--accent);
+      color: #0a0c10;
+      border-color: #498ef7;
+    }
+
+    .button:hover { filter: brightness(1.05); }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      padding: 14px;
+      flex: 1;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 0;
+    }
+
+    h2 { margin: 0; font-size: 16px; }
+
+    textarea {
+      width: 100%;
+      min-height: 280px;
+      background: #0f141b;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 12px;
+      border-radius: 12px;
+      resize: vertical;
+      font: inherit;
+      line-height: 1.6;
+    }
+
+    .segments, .rewrites {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow: auto;
+    }
+
+    .segment, .rewrite {
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px dashed var(--border);
+      background: #0f141b;
+      white-space: pre-wrap;
+      line-height: 1.6;
+    }
+
+    .segment.header { border-style: solid; border-color: #3fb950; }
+
+    .segment-meta { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+
+    .mode-list {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .mode {
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      color: var(--text);
+      background: #121820;
+      transition: all 0.15s ease;
+    }
+
+    .mode.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent);
+      background: #13223b;
+    }
+
+    .status {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .settings-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .settings-modal.active { display: flex; }
+
+    .settings-panel {
+      width: min(560px, 90vw);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    }
+
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { font-size: 13px; color: var(--muted); }
+    .field input, .field select, .field textarea {
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #0f141b;
+      color: var(--text);
+      font: inherit;
+    }
+    .field textarea { min-height: 120px; resize: vertical; }
+
+    .settings-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+
+    .inline-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .pill {
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .segments, .rewrites { max-height: 280px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">AI 降重助手</div>
+    <div class="controls">
+      <span class="pill" id="modelBadge">未选择模型</span>
+      <button class="button" id="settingsBtn">设置</button>
+      <button class="button primary" id="startBtn">开始改写</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <section class="panel" aria-label="源内容">
+      <div class="inline-actions">
+        <h2>原文段落</h2>
+        <button class="button" id="importBtn" type="button">导入文档</button>
+        <input type="file" id="fileInput" accept=".txt,.md,.docx,.doc" hidden />
+        <button class="button" id="segmentBtn">智能分段</button>
+        <span class="pill" id="readinessHint" aria-live="polite">待导入或粘贴内容</span>
+      </div>
+      <textarea id="sourceText" placeholder="粘贴或导入需要降重的内容..."></textarea>
+      <div class="segments" id="segments"></div>
+    </section>
+
+    <section class="panel" aria-label="改写输出">
+      <div class="inline-actions">
+        <h2>改写结果</h2>
+        <div class="mode-list" id="modeList"></div>
+      </div>
+      <div class="status" id="status">等待开始...</div>
+      <div class="rewrites" id="rewrites"></div>
+    </section>
+  </div>
+
+  <div class="settings-modal" id="settingsModal">
+    <div class="settings-panel">
+      <h2>设置</h2>
+      <div class="field">
+        <label for="baseUrl">API 站点（自动识别为 OpenAI 兼容格式）</label>
+        <input id="baseUrl" type="text" placeholder="例如：https://x666.me" />
+      </div>
+      <div class="field">
+        <label for="apiKey">API Key</label>
+        <input id="apiKey" type="password" placeholder="sk-..." />
+      </div>
+      <div class="field">
+        <label for="modelSelect">可用模型</label>
+        <select id="modelSelect"></select>
+      </div>
+      <div class="field">
+        <label for="modeName">新增模式名称</label>
+        <input id="modeName" type="text" placeholder="例如：自定义模式" />
+      </div>
+      <div class="field">
+        <label for="modePrompt">新增模式提示词</label>
+        <textarea id="modePrompt" placeholder="输入该模式的系统提示词..."></textarea>
+      </div>
+      <div class="field">
+        <label>已添加的自定义模式</label>
+        <div id="customModeList" class="segments" style="max-height: 180px;"></div>
+      </div>
+      <div class="settings-actions">
+        <button class="button" id="fetchModels">获取模型</button>
+        <button class="button" id="addMode">添加模式</button>
+        <button class="button" id="saveSettings">保存</button>
+        <button class="button" id="closeSettings">关闭</button>
+      </div>
+      <div class="status" id="settingsHint">输入站点与 key 后点击获取模型。</div>
+    </div>
+  </div>
+
+  <script>
+    const defaultModes = [
+      {
+        id: 'vip-chinese-zhinang',
+        name: '维普+中文+知网降重',
+        prompt: `你的角色与目标： 
+
+你现在扮演一个专业的“论文（或技术文档）修改助手”。你的核心任务是接收一段中文原文（通常是技术性或学术性的描述），并将其改写成一种特定的风格。这种风格的特点是：比原文稍微啰嗦、更具解释性、措辞上更偏向通俗或口语化（但保持专业底线），并且系统性地使用特定的替代词汇和句式结构。 你的目标是精确地模仿分析得出的修改模式，生成“修改后”风格的文本，同时务必保持原文的核心技术信息、逻辑关系和事实准确性，也不要添加过多的字数。
+注意不要过于口语化（通常情况下不会过于口语化，有一些比如至于xxx呢，这种的不要有）
+注意！你输出的内容不应原多于原文！应时刻记得字数和原文相符！
+注意！不要有‘’xxx呢‘’这种形式，如‘至于vue呢’
+不要第一人称
+输入与输出：
+
+输入： 一段中文原文（标记为“原文”）。
+输出： 一段严格按照以下规则修改后的中文文本（标记为“修改后”）。
+核心修改手法与规则（请严格遵守）：
+
+增加冗余与解释性（Verbose Elaboration）：
+
+动词短语扩展： 将简洁的动词或动词短语替换为更长的、带有动作过程描述的短语。
+示例：“管理” -> “开展...的管理工作” 或 “进行管理”
+示例：“交互” -> “进行交互” 或 “开展交互”
+示例：“配置” -> “进行配置”
+示例：“处理” -> “去处理...工作”
+示例：“恢复” -> “进行恢复”
+增加辅助词/结构： 在句子中添加语法上允许但非必需的词语，使句子更饱满。
+示例：适当增加 “了”、“的”、“地”、“所”、“会”、“可以”、“这个”、“方面”、“当中” 等。
+示例：“提供功能” -> “有...功能” 或 “拥有...功能”
+系统性词汇替换（Systematic Synonym/Phrasing Substitution）：
+
+特定动词/介词/连词替换： 将原文中常用的某些词汇固定地替换为特定的替代词。这是模仿目标风格的关键。
+采用 / 使用 -> 运用 / 选用 / 把...当作...来使用
+基于 -> 鉴于 / 基于...来开展
+利用 -> 借助 / 运用 / 凭借
+通过 -> 借助 / 依靠 / 凭借
+和 / 及 / 与 -> 以及 （尤其是在列举多项时）
+并 -> 并且 / 还 / 同时
+其 -> 它 / 其 （可根据语境选择，有时用“它”更口语化）
+特定名词/形容词替换：
+原因 -> 缘由 / 主要原因囊括...
+符合 -> 契合
+适合 -> 适宜
+特点 -> 特性
+提升 / 提高 -> 提高 / 提升 （可互换使用，保持多样性）
+极大(地) -> 极大程度(上)
+立即 -> 马上
+括号内容处理（Bracket Content Integration/Removal）：
+
+解释性括号： 对于原文中用于解释、举例或说明缩写的括号 (...) 或 （...）：
+优先整合： 尝试将括号内的信息自然地融入句子，使用 “也就是”、“即”、“比如”、“像” 等引导词。
+示例：ORM（对象关系映射） -> 对象关系映射即ORM 或 ORM也就是对象关系映射
+示例：功能（如ORM、Admin） -> 功能，比如ORM、Admin 或 功能，像ORM、Admin等
+谨慎省略： 如果整合后语句极其冗长或别扭，并且括号内容并非核心关键信息（例如，非常基础的缩写全称），可以考虑省略。但要极其小心，避免丢失重要上下文或示例。 在提供的范例中，有时示例信息被省略了，你可以模仿这一点，但要判断是否会损失过多信息。
+代码/标识符旁括号： 对于紧跟在代码、文件名、类名旁的括号，通常直接移除括号。
+示例：视图 (views.py) 中 -> 视图也就是views.py中
+示例：权限类 (admin_panel.permissions) -> 权限类 admin_panel.permissions``
+句式微调与口语化倾向（Sentence Structure & Colloquial Touch）：
+
+使用“把”字句： 在合适的场景下，倾向于使用“把”字句。
+示例：“会将对象移动” -> “会把对象移动”
+条件句式转换： 将较书面的条件句式改为稍口语化的形式。
+示例：“若...，则...” -> “要是...，那就...” 或 “如果...，就...”
+名词化与动词化转换： 根据需要进行调整，有时将名词性结构展开为动词性结构，反之亦然，以符合更自然的口语表达。
+示例：“为了将...解耦” -> “为了实现...的解耦”
+增加语气词/连接词： 如在句首或句中添加“那么”、“这样”、“同时”等。
+保持技术准确性（Maintain Technical Accuracy）：
+
+绝对禁止修改： 所有的技术术语（如 Django, RESTful API, Ceph, RGW, S3, JWT, ORM, MySQL）、代码片段 (views.py, settings.py, accounts.CustomUser, .folder_marker）、库名 (Boto3, djangorestframework-simplejwt)、配置项 (CEPH_STORAGE, DATABASES)、API 路径 (/accounts/api/token/refresh/) 等必须保持原样，不得修改或错误转写。
+核心逻辑不变： 修改后的句子必须表达与原文完全相同的技术逻辑、因果关系和功能描述。
+执行指令：
+
+请根据以上所有规则，对接下来提供的“原文”进行修改，生成符合上述特定风格的“修改后”文本。务必仔细揣摩每个规则的细节和示例，力求在风格上高度一致。注意不要过于口语化（通常情况下不会过于口语化，有一些比如至于xxx呢，这种的不要有）注意！你输出的内容不应原多于原文！应时刻记得字数和原文相符！注意！不要有‘’xxx呢‘’这种形式，如‘至于vue呢’
+不要第一人称`
+      },
+      {
+        id: 'en-rewrite-turnitin-safe',
+        name: '英文降重(不可降Turnitin)',
+        prompt: `【ROLE】
+You are an academic-level AI model specifically designed to rephrase and simplify English text while keeping the original meaning intact. Your goal is to reduce AI detection by changing wording, sentence structures, and maintaining a slightly non-native, human-like writing style. The output should feel like a carefully written but slightly imperfect piece by a non-native speaker (e.g., a well-intentioned student or research intern).
+
+【OBJECTIVE】
+- Rephrase the provided text with:
+  - **High lexical substitution** (40-60% of replaceable words).
+  - **Moderate syntactic change** (sentence reordering, active/passive voice changes, splitting/merging sentences).
+  - **Natural, non-native sounding phrasing**, without sounding like a polished academic journal article.
+  - **Maintain overall coherence**, logical flow, and ensure the output is grammatically correct but slightly informal or non-native.
+  - **Avoid introducing new information** or altering the factual content in any way.
+
+【GUIDELINES】
+1. **Lexical Transformation**:
+   - Use simple and widely understood synonyms, not highly technical or overly formal words.
+   - **Examples**:
+     - “Instability in supply chains” → “Uncertain supply”  
+     - “Optimization of production processes” → “Improving the production methods”
+     - “Enhancing customer satisfaction” → “Making customers happier”
+   - Replace academic terms with more conversational alternatives:
+     - “Operational challenges” → “Challenges in running the business”
+     - “Quantitative research methods” → “Using numbers to study things”
+     - “Analyzing data” → “Looking at the numbers”
+
+2. **Sentence Structure**:
+   - Alter sentence structure to simplify and avoid formal academic constructs. Use simple and direct language.
+   - **Examples**:
+     - “This paper will analyze the consequences of supply chain disruption.” → “This paper looks at what happens when the supply chain breaks down.”
+     - “The data indicates that production is delayed due to a shortage of raw materials.” → “The data shows production is late because they don’t have enough materials.”
+   - Switch between active and passive voice to adjust the tone:
+     - Active: “The team completed the task on time.”
+     - Passive: “The task was completed on time.”
+
+3. **Splitting and Merging Sentences**:
+   - Combine short, choppy sentences or break up long, complex ones.
+   - **Example**:
+     - Original: “The company has a good reputation. Customers are loyal.”  
+     - Rewritten: “The company has a strong reputation, and this helps keep customers loyal.”
+     - Original: “Supply chain issues are significant. This affects production.”  
+     - Rewritten: “Supply chain issues are a big problem that affects production.”
+
+4. **Non-native Speaker Style**:
+   - Introduce minor errors that a non-native speaker might make, such as slight awkwardness or overly literal translation.
+   - **Example**:
+     - “In order to improve the situation” → “To improve the situation”
+     - “I will analyze the data collected from…” → “I will look at the data I collect from…”
+
+5. **Expanding / Contracting Content** (Optional):
+   - **Optional**: Occasionally, it’s acceptable to add a small sentence or comment for clarity or to make the text sound more natural.
+   - **Example**:
+     - “The findings indicate instability in the supply chain.” → “The findings show that supply chains are often unstable, which makes it hard to plan.”
+
+6. **Avoiding Overly Technical Language**:
+   - If the original text includes technical jargon, simplify or replace it with more common terms.
+   - **Examples**:
+     - “Dynamic Replenishment Optimization” → “Better restocking methods”
+     - “Optimization techniques using deep reinforcement learning” → “Methods that use advanced machine learning to improve efficiency”
+     - “Utilization of artificial intelligence in manufacturing” → “Using smart technology to make manufacturing better.”
+
+7. **Ensure Natural Flow**:
+   - Keep the flow of ideas smooth and logical, ensuring that the structure feels like an easy-to-read article rather than a technical paper.
+   - **Example**:
+     - Original: “It is essential to analyze both quantitative and qualitative aspects of the data to draw meaningful conclusions.”  
+     - Rewritten: “We need to look at both numbers and opinions to understand the data fully.”
+
+【OUTPUT REQUIREMENTS】
+- Always output **English only**.
+- Focus on **natural readability** with a slightly imperfect, non-native flow.
+- Do **not** add new factual information or alter the meaning of the original text.
+- Ensure each paragraph has the same logical structure but with altered phrasing and syntax.
+- Output only the rephrased text — **no explanation or bullet points**.
+
+【START】
+I will provide you with one or more English paragraphs. Please rephrase them according to the guidelines above.`
+      }
+    ];
+
+    const elements = {
+      sourceText: document.getElementById('sourceText'),
+      segments: document.getElementById('segments'),
+      rewrites: document.getElementById('rewrites'),
+      status: document.getElementById('status'),
+      settingsModal: document.getElementById('settingsModal'),
+      settingsBtn: document.getElementById('settingsBtn'),
+      closeSettings: document.getElementById('closeSettings'),
+      saveSettings: document.getElementById('saveSettings'),
+      fetchModels: document.getElementById('fetchModels'),
+      baseUrl: document.getElementById('baseUrl'),
+      apiKey: document.getElementById('apiKey'),
+      modelSelect: document.getElementById('modelSelect'),
+      modelBadge: document.getElementById('modelBadge'),
+      startBtn: document.getElementById('startBtn'),
+      fileInput: document.getElementById('fileInput'),
+      importBtn: document.getElementById('importBtn'),
+      segmentBtn: document.getElementById('segmentBtn'),
+      modeList: document.getElementById('modeList'),
+      settingsHint: document.getElementById('settingsHint'),
+      modeName: document.getElementById('modeName'),
+      modePrompt: document.getElementById('modePrompt'),
+      customModeList: document.getElementById('customModeList'),
+      addMode: document.getElementById('addMode'),
+      readinessHint: document.getElementById('readinessHint'),
+    };
+
+    let segments = [];
+    let modes = [...defaultModes];
+    const customModeKey = 'ai-rewriter-custom-modes';
+    let activeMode = modes[0];
+    const rateLimit = { max: 5, windowMs: 60_000, timestamps: [] };
+    const offlineMessage = '（本地演示改写，未调用 API）';
+
+    function pruneRateLimit() {
+      const now = Date.now();
+      rateLimit.timestamps = rateLimit.timestamps.filter(t => now - t < rateLimit.windowMs);
+    }
+
+    async function enforceRateLimit() {
+      pruneRateLimit();
+      if (rateLimit.timestamps.length >= rateLimit.max) {
+        const now = Date.now();
+        const earliest = rateLimit.timestamps[0];
+        const waitMs = rateLimit.windowMs - (now - earliest) + 50;
+        elements.status.textContent = `触发频率限制，等待 ${(waitMs / 1000).toFixed(1)} 秒后继续...`;
+        await new Promise(res => setTimeout(res, waitMs));
+        return enforceRateLimit();
+      }
+      rateLimit.timestamps.push(Date.now());
+    }
+
+    function normalizeBaseUrl(url) {
+      if (!url) return '';
+      const withProtocol = /^https?:\/\//.test(url) ? url : `https://${url}`;
+      const clean = withProtocol.replace(/\s+/g, '').replace(/\/$/, '');
+      return clean.endsWith('/v1') ? clean : `${clean}/v1`;
+    }
+
+    function persistSettings() {
+      const config = {
+        baseUrl: normalizeBaseUrl(elements.baseUrl.value),
+        apiKey: elements.apiKey.value,
+        model: elements.modelSelect.value,
+      };
+      localStorage.setItem('ai-rewriter-settings', JSON.stringify(config));
+      elements.modelBadge.textContent = config.model ? `模型：${config.model}` : '未选择模型';
+      updateReadiness();
+    }
+
+    function loadSettings() {
+      const saved = localStorage.getItem('ai-rewriter-settings');
+      if (!saved) return;
+      try {
+        const config = JSON.parse(saved);
+        elements.baseUrl.value = config.baseUrl?.replace(/\/v1$/, '') || '';
+        elements.apiKey.value = config.apiKey || '';
+        if (config.model) {
+          const option = document.createElement('option');
+          option.value = config.model;
+          option.textContent = config.model;
+          elements.modelSelect.appendChild(option);
+          elements.modelSelect.value = config.model;
+          elements.modelBadge.textContent = `模型：${config.model}`;
+        }
+        updateReadiness();
+      } catch (e) {
+        console.warn('无法读取设置', e);
+      }
+    }
+
+    function toggleSettings(show) {
+      elements.settingsModal.classList.toggle('active', show);
+      if (show) {
+        elements.settingsHint.textContent = '输入站点与 Key 后点击获取模型。';
+      }
+    }
+
+    function renderModes() {
+      elements.modeList.innerHTML = '';
+      modes.forEach(mode => {
+        const btn = document.createElement('button');
+        btn.className = `mode ${mode.id === activeMode.id ? 'active' : ''}`;
+        btn.textContent = mode.name;
+        btn.title = mode.prompt;
+        btn.addEventListener('click', () => {
+          activeMode = mode;
+          renderModes();
+        });
+        elements.modeList.appendChild(btn);
+      });
+    }
+
+    function persistCustomModes() {
+      const customs = modes.filter(m => m.custom);
+      localStorage.setItem(customModeKey, JSON.stringify(customs));
+    }
+
+    function renderCustomModes() {
+      elements.customModeList.innerHTML = '';
+      const customs = modes.filter(m => m.custom);
+      if (!customs.length) {
+        const hint = document.createElement('div');
+        hint.className = 'segment';
+        hint.textContent = '暂无自定义模式';
+        elements.customModeList.appendChild(hint);
+        return;
+      }
+      customs.forEach(mode => {
+        const item = document.createElement('div');
+        item.className = 'segment';
+        const header = document.createElement('div');
+        header.className = 'segment-meta';
+        header.textContent = mode.name;
+        const content = document.createElement('div');
+        content.textContent = mode.prompt.slice(0, 160) + (mode.prompt.length > 160 ? '...' : '');
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'button';
+        removeBtn.style.marginTop = '8px';
+        removeBtn.textContent = '删除';
+        removeBtn.addEventListener('click', () => {
+          modes = modes.filter(m => m.id !== mode.id);
+          if (activeMode.id === mode.id) {
+            activeMode = modes[0] || defaultModes[0];
+          }
+          persistCustomModes();
+          renderModes();
+          renderCustomModes();
+        });
+        item.appendChild(header);
+        item.appendChild(content);
+        item.appendChild(removeBtn);
+        elements.customModeList.appendChild(item);
+      });
+    }
+
+    function addCustomMode() {
+      const name = elements.modeName.value.trim();
+      const prompt = elements.modePrompt.value.trim();
+      if (!name || !prompt) {
+        elements.settingsHint.textContent = '请填写模式名称与提示词。';
+        return;
+      }
+      const id = `custom-${Date.now()}`;
+      const mode = { id, name, prompt, custom: true };
+      modes.push(mode);
+      elements.modeName.value = '';
+      elements.modePrompt.value = '';
+      activeMode = mode;
+      persistCustomModes();
+      renderModes();
+      renderCustomModes();
+      elements.settingsHint.textContent = '自定义模式已添加。';
+    }
+
+    function loadCustomModes() {
+      const saved = localStorage.getItem(customModeKey);
+      if (!saved) return;
+      try {
+        const customs = JSON.parse(saved);
+        if (Array.isArray(customs)) {
+          modes.push(...customs.map(m => ({ ...m, custom: true })));
+        }
+      } catch (e) {
+        console.warn('无法读取自定义模式', e);
+      }
+    }
+
+    function splitLongParagraph(text, maxLen = 500) {
+      if (text.length <= maxLen) return [text];
+      const parts = [];
+      let current = '';
+      const sentences = text.split(/(?<=[。！？!.?])/);
+      sentences.forEach(sentence => {
+        if ((current + sentence).length > maxLen && current) {
+          parts.push(current.trim());
+          current = sentence;
+        } else {
+          current += sentence;
+        }
+      });
+      if (current.trim()) parts.push(current.trim());
+      return parts;
+    }
+
+    function segmentDocument(text) {
+      segments = [];
+      const lines = text.split(/\n/);
+      let buffer = [];
+
+      const flushParagraph = () => {
+        if (buffer.length) {
+          const para = buffer.join('\n').trim();
+          if (para) {
+            splitLongParagraph(para).forEach(chunk => segments.push({ type: 'paragraph', content: chunk }));
+          }
+          buffer = [];
+        }
+      };
+
+      const headingRegex = /^(#{1,6}\s+.+)|(\d+\.\s+.+)/;
+
+      lines.forEach(line => {
+        const trimmed = line.trim();
+        if (headingRegex.test(trimmed)) {
+          flushParagraph();
+          segments.push({ type: 'heading', content: trimmed });
+        } else if (!trimmed) {
+          flushParagraph();
+        } else {
+          buffer.push(line);
+        }
+      });
+      flushParagraph();
+      renderSegments();
+    }
+
+    function renderSegments() {
+      elements.segments.innerHTML = '';
+      segments.forEach((seg, idx) => {
+        const div = document.createElement('div');
+        div.className = `segment ${seg.type === 'heading' ? 'header' : ''}`;
+        div.innerHTML = `<div class="segment-meta">${seg.type === 'heading' ? '标题' : '段落'} ${idx + 1}</div>${seg.content}`;
+        elements.segments.appendChild(div);
+      });
+      elements.status.textContent = segments.length ? `已分段：${segments.length} 段` : '尚未分段';
+      updateReadiness();
+    }
+
+    function updateReadiness() {
+      const hasText = !!elements.sourceText.value.trim();
+      const hasSegments = segments.length > 0;
+      let parsed = {};
+      const config = localStorage.getItem('ai-rewriter-settings');
+      try {
+        parsed = config ? JSON.parse(config) : {};
+      } catch (error) {
+        console.warn('配置读取失败，已清除', error);
+        localStorage.removeItem('ai-rewriter-settings');
+      }
+      const hasApi = !!normalizeBaseUrl(parsed.baseUrl) && !!parsed.apiKey && !!parsed.model;
+
+      if (!hasText) {
+        elements.readinessHint.textContent = '待导入或粘贴内容';
+      } else if (!hasSegments) {
+        elements.readinessHint.textContent = '已录入文本，点击智能分段';
+      } else if (hasApi) {
+        elements.readinessHint.textContent = '已分段，可直接改写（将调用接口）';
+      } else {
+        elements.readinessHint.textContent = '已分段，未配置接口将使用本地演示';
+      }
+    }
+
+    async function fetchModels() {
+      const baseUrl = normalizeBaseUrl(elements.baseUrl.value);
+      const apiKey = elements.apiKey.value;
+      if (!baseUrl || !apiKey) {
+        elements.settingsHint.textContent = '请填写站点与 Key。';
+        return;
+      }
+      elements.settingsHint.textContent = '正在获取模型...';
+      try {
+        const res = await fetch('/api/models', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey
+          },
+          body: JSON.stringify({ baseUrl })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const list = data.data || data.models || [];
+        elements.modelSelect.innerHTML = '';
+        list.forEach(item => {
+          const opt = document.createElement('option');
+          opt.value = item.id || item; // 兼容数组字符串
+          opt.textContent = item.id || item;
+          elements.modelSelect.appendChild(opt);
+        });
+        if (elements.modelSelect.options.length) {
+          elements.modelSelect.value = elements.modelSelect.options[0].value;
+          elements.modelBadge.textContent = `模型：${elements.modelSelect.value}`;
+          persistSettings();
+          elements.settingsHint.textContent = '模型获取成功。';
+          updateReadiness();
+        } else {
+          elements.settingsHint.textContent = '未获取到模型，请检查站点。';
+        }
+      } catch (error) {
+        console.error(error);
+        elements.settingsHint.textContent = '获取模型失败，请检查站点或 Key。';
+        updateReadiness();
+      }
+    }
+
+    function localRewrite(text) {
+      if (!text.trim()) return text;
+      return text
+        .replace(/通过/g, '借助')
+        .replace(/并且/g, '同时')
+        .replace(/实现/g, '得以实现')
+        .replace(/可以/g, '可以去')
+        .replace(/需要/g, '需要先') + `\n\n${offlineMessage}`;
+    }
+
+    async function rewriteSegment(segment, index) {
+      if (segment.type === 'heading') return { ...segment, rewritten: segment.content };
+      const baseUrl = normalizeBaseUrl(elements.baseUrl.value);
+      const apiKey = elements.apiKey.value;
+      const model = elements.modelSelect.value;
+      const prompt = activeMode.prompt;
+
+      if (!baseUrl || !apiKey || !model) {
+        return { ...segment, rewritten: localRewrite(segment.content) };
+      }
+
+      try {
+        await enforceRateLimit();
+        const res = await fetch('/api/rewrite', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey
+          },
+          body: JSON.stringify({ baseUrl, model, prompt, content: segment.content })
+        });
+
+        if (res.status === 429) {
+          const payload = await res.json().catch(() => ({}));
+          const wait = payload.retryAfter || 10000;
+          elements.status.textContent = `达到限速，等待 ${(wait / 1000).toFixed(1)} 秒...`;
+          await new Promise(resume => setTimeout(resume, wait));
+          return rewriteSegment(segment, index);
+        }
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const choice = data.rewritten || data.choices?.[0]?.message?.content;
+        return { ...segment, rewritten: choice || segment.content };
+      } catch (error) {
+        console.error('rewrite failed', error);
+        return { ...segment, rewritten: `${segment.content}\n\n（改写失败，已保留原文）` };
+      }
+    }
+
+    async function startRewrite() {
+      if (!segments.length) segmentDocument(elements.sourceText.value);
+      if (!segments.length) {
+        elements.status.textContent = '请先输入内容并分段。';
+        return;
+      }
+      elements.startBtn.disabled = true;
+      elements.startBtn.textContent = '改写中...';
+      try {
+        const useOffline = !normalizeBaseUrl(elements.baseUrl.value) || !elements.apiKey.value || !elements.modelSelect.value;
+        if (useOffline) {
+          elements.status.textContent = '未配置 API，使用本地演示改写...';
+        } else {
+          elements.status.textContent = '逐段改写中...';
+        }
+        elements.rewrites.innerHTML = '';
+
+        for (let i = 0; i < segments.length; i++) {
+          const seg = segments[i];
+          const result = await rewriteSegment(seg, i);
+          const card = document.createElement('div');
+          card.className = 'rewrite';
+          card.innerHTML = `<div class="segment-meta">${seg.type === 'heading' ? '标题' : '段落'} ${i + 1}</div>${result.rewritten}`;
+          elements.rewrites.appendChild(card);
+          elements.status.textContent = `已完成 ${i + 1}/${segments.length}`;
+        }
+        elements.status.textContent = '改写完成，可复制使用。';
+      } finally {
+        elements.startBtn.disabled = false;
+        elements.startBtn.textContent = '开始改写';
+      }
+    }
+
+    async function parseDocx(arrayBuffer) {
+      if (!window.mammoth) return '';
+      try {
+        const { value } = await window.mammoth.extractRawText({ arrayBuffer });
+        return value || '';
+      } catch (error) {
+        console.error('docx parse failed', error);
+        return '';
+      }
+    }
+
+    function loadMammothIfNeeded() {
+      if (window.mammoth) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/mammoth/mammoth.browser.min.js';
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('mammoth load failed'));
+        document.head.appendChild(script);
+      });
+    }
+
+    function setupFileInput() {
+      elements.fileInput.addEventListener('change', async event => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        elements.status.textContent = `正在读取 ${file.name}...`;
+        try {
+          if (ext === 'doc') {
+            elements.status.textContent = '暂不支持 .doc，请转换为 .docx 或文本后再试。';
+            return;
+          }
+
+          if (ext === 'docx') {
+            await loadMammothIfNeeded();
+            const buffer = await file.arrayBuffer();
+            const text = await parseDocx(buffer);
+            elements.sourceText.value = text || '';
+          } else {
+            const reader = new FileReader();
+            const text = await new Promise((resolve, reject) => {
+              reader.onload = e => resolve(e.target?.result || '');
+              reader.onerror = reject;
+              reader.readAsText(file, 'utf-8');
+            });
+            elements.sourceText.value = text;
+          }
+          segmentDocument(elements.sourceText.value);
+          elements.status.textContent = `已载入 ${file.name}，共 ${segments.length} 段`;
+        } catch (error) {
+          console.error('文件读取失败', error);
+          elements.status.textContent = '文件读取失败，请重试或转为文本。';
+        }
+      });
+    }
+
+    function bindEvents() {
+      elements.settingsBtn.addEventListener('click', () => toggleSettings(true));
+      elements.closeSettings.addEventListener('click', () => toggleSettings(false));
+      elements.settingsModal.addEventListener('click', (e) => {
+        if (e.target === elements.settingsModal) toggleSettings(false);
+      });
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') toggleSettings(false);
+      });
+      elements.saveSettings.addEventListener('click', () => { persistSettings(); toggleSettings(false); elements.status.textContent = '设置已保存，可开始改写。'; });
+      elements.fetchModels.addEventListener('click', fetchModels);
+      elements.addMode.addEventListener('click', addCustomMode);
+      elements.segmentBtn.addEventListener('click', () => segmentDocument(elements.sourceText.value));
+      elements.startBtn.addEventListener('click', startRewrite);
+      elements.importBtn.addEventListener('click', () => elements.fileInput.click());
+      elements.sourceText.addEventListener('input', () => {
+        if (segments.length) {
+          segments = [];
+          elements.segments.innerHTML = '';
+          elements.status.textContent = '内容已更新，请重新分段。';
+        }
+        updateReadiness();
+      });
+      setupFileInput();
+    }
+
+    function init() {
+      loadCustomModes();
+      renderModes();
+      renderCustomModes();
+      loadSettings();
+      bindEvents();
+      segmentDocument('');
+    }
+
+    init();
+  </script>
+</body>
+</html>
